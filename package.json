@@ -1,0 +1,25 @@
+{
+  "name": "local-chat-with-ip-protocol",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DafaPp0/ip-chat.git"
+  },
+  "author": "Dafapp",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/DafaPp0/ip-chat/issues"
+  },
+  "homepage": "https://github.com/DafaPp0/ip-chat#readme",
+  "dependencies": {
+    "crc-32": "^1.2.2",
+    "express": "^5.1.0",
+    "multer": "^2.0.2",
+    "socket.io": "^4.8.1"
+  }
+}

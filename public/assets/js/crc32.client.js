@@ -24,11 +24,12 @@ class CRC32 {
     for (let i = 0; i < str.length; i++) {
       crc = (crc >>> 8) ^ this.table[(crc ^ str.charCodeAt(i)) & 0xff];
     }
-    return ((crc ^ -1) >>> 0).toString(16).toUpperCase();
+    // Return binary string (32-bit)
+    return ((crc ^ -1) >>> 0).toString(2).padStart(32, "0");
   }
 
   verify(str, checksum) {
-    return this.calculate(str) === checksum.toUpperCase();
+    return this.calculate(str) === checksum;
   }
 }
 

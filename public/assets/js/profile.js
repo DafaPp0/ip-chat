@@ -60,7 +60,14 @@ const ProfileManager = {
   },
 
   async submitProfile(username) {
+    const loadingScreen = document.getElementById("loadingScreen");
+    const loadingStatus = document.getElementById("loadingStatus");
+
     try {
+      // Show loading
+      loadingScreen.classList.remove("hidden");
+      loadingStatus.textContent = "Creating profile...";
+
       const formData = new FormData();
       formData.append("username", username);
 
@@ -85,21 +92,38 @@ const ProfileManager = {
 
       console.log("Profile setup successful:", data.profile);
 
+      loadingStatus.textContent = "Profile created! Loading chat...";
+
       // Save profile to localStorage
       localStorage.setItem("userProfile", JSON.stringify(data.profile));
 
-      // Hide modal and show chat
-      document.getElementById("profileModal").classList.add("hidden");
-      document.getElementById("chatContainer").classList.remove("hidden");
+      // Wait for ChatApp
+      await this.waitForChatApp();
+
+      loadingStatus.textContent = "Connecting to chat server...";
 
       // Initialize chat with profile
       if (window.ChatApp) {
-        window.ChatApp.initWithProfile(data.profile);
+        await window.ChatApp.initWithProfile(data.profile);
       }
 
+      // Small delay
+      await this.delay(500);
+
+      // Hide modal and loading, show chat
+      document.getElementById("profileModal").classList.add("hidden");
+      loadingScreen.classList.add("hidden");
+      document.getElementById("chatContainer").classList.remove("hidden");
+
       this.showToast("Profile setup successful!", "success");
+
+      console.log("✅ Profile setup and chat initialization complete");
     } catch (error) {
       console.error("Error setting up profile:", error);
+
+      // Hide loading on error
+      loadingScreen.classList.add("hidden");
+
       this.showToast(
         error.message || "Failed to setup profile. Please try again.",
         "error"
@@ -109,6 +133,12 @@ const ProfileManager = {
 
   async checkExistingProfile() {
     try {
+      const loadingScreen = document.getElementById("loadingScreen");
+      const loadingStatus = document.getElementById("loadingStatus");
+
+      // Update status
+      loadingStatus.textContent = "Checking authentication...";
+
       console.log("Checking existing profile...");
       const response = await fetch("/api/profile/check");
       const data = await response.json();
@@ -116,28 +146,76 @@ const ProfileManager = {
       console.log("Profile check result:", data);
 
       if (data.exists && data.profile) {
-        // Profile exists, skip modal
+        // Profile exists, initialize chat
+        loadingStatus.textContent = "Loading chat...";
+
         localStorage.setItem("userProfile", JSON.stringify(data.profile));
-        document.getElementById("profileModal").classList.add("hidden");
-        document.getElementById("chatContainer").classList.remove("hidden");
 
         console.log("Profile found, initializing chat...");
 
+        // Wait for ChatApp to be ready
+        await this.waitForChatApp();
+
+        loadingStatus.textContent = "Connecting to chat server...";
+
+        // Initialize chat with profile
         if (window.ChatApp) {
-          window.ChatApp.initWithProfile(data.profile);
+          await window.ChatApp.initWithProfile(data.profile);
         }
+
+        // Small delay to ensure everything is loaded
+        await this.delay(500);
+
+        // Hide loading and show chat
+        loadingScreen.classList.add("hidden");
+        document.getElementById("profileModal").classList.add("hidden");
+        document.getElementById("chatContainer").classList.remove("hidden");
+
+        console.log("✅ Chat initialized successfully");
       } else {
         // Show profile setup modal
         console.log("No profile found, showing setup modal");
+        loadingStatus.textContent = "Please setup your profile...";
+
+        await this.delay(500);
+
+        loadingScreen.classList.add("hidden");
         document.getElementById("profileModal").classList.remove("hidden");
         document.getElementById("chatContainer").classList.add("hidden");
       }
     } catch (error) {
       console.error("Error checking profile:", error);
-      // Show modal on error
+
+      const loadingScreen = document.getElementById("loadingScreen");
+      const loadingStatus = document.getElementById("loadingStatus");
+
+      loadingStatus.textContent = "Connection failed. Retrying...";
+
+      // Retry after 2 seconds
+      await this.delay(2000);
+
+      // Hide loading and show modal on error
+      loadingScreen.classList.add("hidden");
       document.getElementById("profileModal").classList.remove("hidden");
       document.getElementById("chatContainer").classList.add("hidden");
     }
+  },
+
+  async waitForChatApp() {
+    // Wait for ChatApp to be available
+    let attempts = 0;
+    while (!window.ChatApp && attempts < 50) {
+      await this.delay(100);
+      attempts++;
+    }
+
+    if (!window.ChatApp) {
+      throw new Error("ChatApp failed to initialize");
+    }
+  },
+
+  delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   },
 
   showToast(message, type = "info") {

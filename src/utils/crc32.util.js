@@ -4,7 +4,7 @@ const crc32Util = {
   /**
    * Calculate CRC32 checksum for a string
    * @param {string} str - Input string
-   * @returns {string} - Hexadecimal CRC32 checksum
+   * @returns {string} - Binary CRC32 checksum (32-bit)
    */
   calculate(str) {
     if (typeof str !== "string") {
@@ -12,15 +12,15 @@ const crc32Util = {
     }
 
     const crc = CRC32.str(str);
-    // Convert to unsigned 32-bit and format as hex
+    // Convert to unsigned 32-bit and format as binary
     const unsigned = crc >>> 0;
-    return unsigned.toString(16).toUpperCase();
+    return unsigned.toString(2).padStart(32, "0");
   },
 
   /**
    * Verify CRC32 checksum
    * @param {string} str - Original string
-   * @param {string} checksum - Expected checksum (hex)
+   * @param {string} checksum - Expected checksum (binary)
    * @returns {boolean} - True if checksum matches
    */
   verify(str, checksum) {
@@ -29,13 +29,13 @@ const crc32Util = {
     }
 
     const calculated = this.calculate(str);
-    return calculated === checksum.toUpperCase();
+    return calculated === checksum;
   },
 
   /**
    * Calculate CRC32 for buffer
    * @param {Buffer} buffer - Input buffer
-   * @returns {string} - Hexadecimal CRC32 checksum
+   * @returns {string} - Binary CRC32 checksum (32-bit)
    */
   calculateBuffer(buffer) {
     if (!Buffer.isBuffer(buffer)) {
@@ -44,7 +44,7 @@ const crc32Util = {
 
     const crc = CRC32.buf(buffer);
     const unsigned = crc >>> 0;
-    return unsigned.toString(16).toUpperCase();
+    return unsigned.toString(2).padStart(32, "0");
   },
 
   /**

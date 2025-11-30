@@ -67,15 +67,23 @@ const ChatApp = {
       "modalCurrentUserAvatar"
     );
 
+    // Check if elements exist (modal might not be in DOM yet)
+    if (!modalMembersList || !modalOnlineCount) {
+      console.log("⚠️ Modal elements not found, skipping update");
+      return;
+    }
+
     // Update count
     modalOnlineCount.textContent = this.members.size;
 
     // Update current user
-    if (this.currentProfile) {
+    if (this.currentProfile && modalCurrentUserName && modalCurrentUserAvatar) {
       modalCurrentUserName.textContent = this.currentProfile.username;
       if (this.currentProfile.photo) {
-        modalCurrentUserAvatar.querySelector("img").src =
-          this.currentProfile.photo;
+        const img = modalCurrentUserAvatar.querySelector("img");
+        if (img) {
+          img.src = this.currentProfile.photo;
+        }
       } else {
         modalCurrentUserAvatar.innerHTML = `<span class="text-lg font-semibold">${this.currentProfile.username
           .charAt(0)
@@ -110,7 +118,7 @@ const ChatApp = {
                         <div class="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center overflow-hidden ring-2 ring-transparent group-hover:ring-indigo-500/30 transition-all">
                             ${
                               member.photo
-                                ? `<img src="${member.photo}" alt="${member.username}" class="w-full h-full object-cover">`
+                                ? `<img src="${member.photo}" alt="${member.username}" class="w-full h-full object-cover object-center">`
                                 : `<span class="text-sm font-semibold">${member.username
                                     .charAt(0)
                                     .toUpperCase()}</span>`
@@ -137,7 +145,7 @@ const ChatApp = {
     });
   },
 
-  initWithProfile(profile) {
+  async initWithProfile(profile) {
     console.log("Initializing chat with profile:", profile);
     this.currentProfile = profile;
     this.updateCurrentUserUI();
@@ -146,14 +154,70 @@ const ChatApp = {
     if (window.SocketManager && !window.SocketManager.isConnected) {
       console.log("Connecting to WebSocket...");
       window.SocketManager.init();
+
+      // Wait for connection
+      await this.waitForConnection();
     }
 
-    // Request chat history after a short delay
-    setTimeout(() => {
-      if (window.SocketManager) {
-        window.SocketManager.requestChatHistory();
-      }
-    }, 1000);
+    // Request chat history after connection
+    if (window.SocketManager && window.SocketManager.isConnected) {
+      console.log("Requesting chat history...");
+      window.SocketManager.requestChatHistory();
+    }
+
+    console.log("✅ Chat initialization complete");
+  },
+
+  async waitForConnection() {
+    // Wait for socket to connect (max 5 seconds)
+    let attempts = 0;
+    while (!window.SocketManager.isConnected && attempts < 50) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      attempts++;
+    }
+
+    if (!window.SocketManager.isConnected) {
+      console.warn("⚠️ Socket connection timeout");
+    } else {
+      console.log("✅ Socket connected");
+    }
+  },
+
+  clearMessagesOnly() {
+    // Clear only messages, preserve background layers (pattern + overlays)
+    const messagesContainer = document.getElementById("messagesContainer");
+    const messagesList = messagesContainer.querySelector(".max-w-5xl");
+
+    if (messagesList) {
+      messagesList.remove();
+    }
+  },
+
+  ensureBackgroundLayers() {
+    // Ensure background pattern exists
+    const messagesContainer = document.getElementById("messagesContainer");
+
+    // Check if pattern layer exists
+    let patternLayer = messagesContainer.querySelector(".pattern-layer");
+    if (!patternLayer) {
+      patternLayer = document.createElement("div");
+      patternLayer.className =
+        "pattern-layer fixed inset-0 pointer-events-none";
+      // Use SVG as mask, gradient as fill
+      patternLayer.style.webkitMaskImage = "url('assets/pattern.svg')";
+      patternLayer.style.maskImage = "url('assets/pattern.svg')";
+      patternLayer.style.webkitMaskSize = "contain";
+      patternLayer.style.maskSize = "contain";
+      patternLayer.style.webkitMaskRepeat = "repeat";
+      patternLayer.style.maskRepeat = "repeat";
+      patternLayer.style.background =
+        "linear-gradient(132deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%)";
+      patternLayer.style.opacity = "0.15";
+      messagesContainer.insertBefore(
+        patternLayer,
+        messagesContainer.firstChild
+      );
+    }
   },
 
   setupEventListeners() {
@@ -194,12 +258,24 @@ const ChatApp = {
       this.style.height = "auto";
       this.style.height = Math.min(this.scrollHeight, 120) + "px";
     });
+
+    // Ctrl+P for CRC Debug Console
+    document.addEventListener("keydown", (e) => {
+      if (e.ctrlKey && e.key === "p") {
+        e.preventDefault();
+        this.toggleCRCConsole();
+      }
+    });
   },
 
   handleInputChange(e) {
     const input = e.target;
     const charCount = document.getElementById("charCount");
     const sendBtn = document.getElementById("sendBtn");
+
+    // Auto-resize textarea based on content (max 120px = ~5 lines)
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 120) + "px";
 
     // Update character count
     charCount.textContent = input.value.length;
@@ -267,17 +343,23 @@ const ChatApp = {
   },
 
   clearChat() {
-    const messagesContainer = document.getElementById("messagesContainer");
+    // Show custom confirmation modal
+    this.showConfirmModal(
+      "Clear Chat History?",
+      "This will permanently delete all messages in this chat. This action cannot be undone.",
+      "Clear Chat",
+      () => {
+        // Confirmed - clear the chat
+        const messagesContainer = document.getElementById("messagesContainer");
 
-    if (
-      confirm(
-        "Are you sure you want to clear all messages? This cannot be undone."
-      )
-    ) {
-      // Clear UI - restore welcome message with Telegram-style pattern
-      messagesContainer.innerHTML = `
-                <div class="absolute inset-0 opacity-[0.03]" style="background-image: url('data:image/svg+xml,%3Csvg width=%22200%22 height=%22200%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cdefs%3E%3Cpattern id=%22telegram-pattern%22 x=%220%22 y=%220%22 width=%22200%22 height=%22200%22 patternUnits=%22userSpaceOnUse%22%3E%3C!-- Message Icon --%3E%3Cpath d=%22M30,40 L50,40 L50,60 L40,70 L40,60 L30,60 Z%22 fill=%22%239CA3AF%22 opacity=%220.4%22/%3E%3C!-- Heart Icon --%3E%3Cpath d=%22M150,30 Q160,20 170,30 Q175,35 170,45 L160,55 L150,45 Q145,35 150,30 Z%22 fill=%22%239CA3AF%22 opacity=%220.3%22/%3E%3C!-- Star Icon --%3E%3Cpath d=%22M80,140 L85,155 L100,157 L90,167 L92,182 L80,175 L68,182 L70,167 L60,157 L75,155 Z%22 fill=%22%239CA3AF%22 opacity=%220.35%22/%3E%3C!-- Circle --%3E%3Ccircle cx=%22170%22 cy=%22140%22 r=%228%22 fill=%22%239CA3AF%22 opacity=%220.25%22/%3E%3C!-- Camera Icon --%3E%3Crect x=%2230%22 y=%22160%22 width=%2230%22 height=%2220%22 rx=%223%22 fill=%22%239CA3AF%22 opacity=%220.3%22/%3E%3Ccircle cx=%2245%22 cy=%22170%22 r=%226%22 fill=%22%239CA3AF%22 opacity=%220.4%22/%3E%3C!-- Music Note --%3E%3Cpath d=%22M140,80 L145,80 L145,100 Q145,105 140,105 Q135,105 135,100 L135,85 Z%22 fill=%22%239CA3AF%22 opacity=%220.3%22/%3E%3Ccircle cx=%22140%22 cy=%22105%22 r=%224%22 fill=%22%239CA3AF%22 opacity=%220.35%22/%3E%3C!-- Phone Icon --%3E%3Crect x=%2275%22 y=%2230%22 width=%2215%22 height=%2225%22 rx=%223%22 fill=%22%239CA3AF%22 opacity=%220.3%22/%3E%3C!-- Paperclip --%3E%3Cpath d=%22M110,150 Q105,145 110,140 L120,130 Q125,125 130,130 Q135,135 130,140 L115,155%22 stroke=%22%239CA3AF%22 fill=%22none%22 stroke-width=%222%22 opacity=%220.3%22/%3E%3C!-- Small dots --%3E%3Ccircle cx=%22160%22 cy=%2280%22 r=%223%22 fill=%22%239CA3AF%22 opacity=%220.2%22/%3E%3Ccircle cx=%2250%22 cy=%22120%22 r=%223%22 fill=%22%239CA3AF%22 opacity=%220.2%22/%3E%3Ccircle cx=%22100%22 cy=%2270%22 r=%223%22 fill=%22%239CA3AF%22 opacity=%220.2%22/%3E%3C/pattern%3E%3C/defs%3E%3Crect width=%22200%22 height=%22200%22 fill=%22url(%23telegram-pattern)%22/%3E%3C/svg%3E'); background-size: 200px 200px;"></div>
-                <div class="max-w-5xl mx-auto space-y-4 relative z-10">
+        // Clear only messages, preserve background
+        this.clearMessagesOnly();
+        this.ensureBackgroundLayers();
+
+        // Add welcome message
+        const welcomeDiv = document.createElement("div");
+        welcomeDiv.className = "max-w-5xl mx-auto space-y-4 relative z-10";
+        welcomeDiv.innerHTML = `
                     <div class="flex flex-col items-center justify-center min-h-[60vh] text-center">
                         <div class="w-20 h-20 gradient-primary rounded-full flex items-center justify-center mb-4 shadow-lg shadow-indigo-500/20">
                             <svg xmlns="http://www.w3.org/2000/svg" class="w-10 h-10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -287,11 +369,51 @@ const ChatApp = {
                         <h3 class="text-2xl font-bold mb-2">Chat Cleared!</h3>
                         <p class="text-gray-400">Start a new conversation</p>
                     </div>
-                </div>
-            `;
+                `;
+        messagesContainer.appendChild(welcomeDiv);
 
-      this.showToast("Chat cleared successfully", "success");
-    }
+        this.showToast("Chat cleared successfully", "success");
+      }
+    );
+  },
+
+  showConfirmModal(title, message, confirmText, onConfirm) {
+    const modal = document.getElementById("confirmModal");
+    const modalContent = document.getElementById("confirmModalContent");
+    const modalTitle = document.getElementById("confirmModalTitle");
+    const modalMessage = document.getElementById("confirmModalMessage");
+    const confirmBtn = document.getElementById("confirmModalBtn");
+
+    // Set content
+    modalTitle.textContent = title;
+    modalMessage.textContent = message;
+    confirmBtn.textContent = confirmText;
+
+    // Set confirm action
+    confirmBtn.onclick = () => {
+      this.hideConfirmModal();
+      onConfirm();
+    };
+
+    // Show modal with animation
+    modal.classList.remove("hidden");
+    setTimeout(() => {
+      modalContent.classList.remove("scale-95", "opacity-0");
+      modalContent.classList.add("scale-100", "opacity-100");
+    }, 10);
+  },
+
+  hideConfirmModal() {
+    const modal = document.getElementById("confirmModal");
+    const modalContent = document.getElementById("confirmModalContent");
+
+    // Hide with animation
+    modalContent.classList.remove("scale-100", "opacity-100");
+    modalContent.classList.add("scale-95", "opacity-0");
+
+    setTimeout(() => {
+      modal.classList.add("hidden");
+    }, 200);
   },
 
   // Socket event handlers
@@ -317,8 +439,20 @@ const ChatApp = {
     const messageHTML = this.createMessageElement(data, isOwnMessage, isValid);
     messagesList.insertAdjacentHTML("beforeend", messageHTML);
 
-    // Scroll to bottom
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    // Auto scroll to bottom (smooth)
+    this.scrollToBottom();
+  },
+
+  scrollToBottom() {
+    const messagesContainer = document.getElementById("messagesContainer");
+    if (messagesContainer) {
+      setTimeout(() => {
+        messagesContainer.scrollTo({
+          top: messagesContainer.scrollHeight,
+          behavior: "smooth",
+        });
+      }, 100);
+    }
   },
 
   onUserJoined(data) {
@@ -328,13 +462,16 @@ const ChatApp = {
     // Show notification
     const messagesContainer = document.getElementById("messagesContainer");
 
+    // Ensure background layers exist
+    this.ensureBackgroundLayers();
+
     // Check if max-w container exists, if not create it
     let messagesList = messagesContainer.querySelector(".max-w-5xl");
     if (!messagesList) {
-      // Remove welcome if exists
-      messagesContainer.innerHTML = `
-                <div class="absolute inset-0 opacity-[0.03]" style="background-image: url('data:image/svg+xml,%3Csvg width=%22200%22 height=%22200%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cdefs%3E%3Cpattern id=%22telegram-pattern%22 x=%220%22 y=%220%22 width=%22200%22 height=%22200%22 patternUnits=%22userSpaceOnUse%22%3E%3C!-- Message Icon --%3E%3Cpath d=%22M30,40 L50,40 L50,60 L40,70 L40,60 L30,60 Z%22 fill=%22%239CA3AF%22 opacity=%220.4%22/%3E%3C!-- Heart Icon --%3E%3Cpath d=%22M150,30 Q160,20 170,30 Q175,35 170,45 L160,55 L150,45 Q145,35 150,30 Z%22 fill=%22%239CA3AF%22 opacity=%220.3%22/%3E%3C!-- Star Icon --%3E%3Cpath d=%22M80,140 L85,155 L100,157 L90,167 L92,182 L80,175 L68,182 L70,167 L60,157 L75,155 Z%22 fill=%22%239CA3AF%22 opacity=%220.35%22/%3E%3C!-- Circle --%3E%3Ccircle cx=%22170%22 cy=%22140%22 r=%228%22 fill=%22%239CA3AF%22 opacity=%220.25%22/%3E%3C!-- Camera Icon --%3E%3Crect x=%2230%22 y=%22160%22 width=%2230%22 height=%2220%22 rx=%223%22 fill=%22%239CA3AF%22 opacity=%220.3%22/%3E%3Ccircle cx=%2245%22 cy=%22170%22 r=%226%22 fill=%22%239CA3AF%22 opacity=%220.4%22/%3E%3C!-- Music Note --%3E%3Cpath d=%22M140,80 L145,80 L145,100 Q145,105 140,105 Q135,105 135,100 L135,85 Z%22 fill=%22%239CA3AF%22 opacity=%220.3%22/%3E%3Ccircle cx=%22140%22 cy=%22105%22 r=%224%22 fill=%22%239CA3AF%22 opacity=%220.35%22/%3E%3C!-- Phone Icon --%3E%3Crect x=%2275%22 y=%2230%22 width=%2215%22 height=%2225%22 rx=%223%22 fill=%22%239CA3AF%22 opacity=%220.3%22/%3E%3C!-- Paperclip --%3E%3Cpath d=%22M110,150 Q105,145 110,140 L120,130 Q125,125 130,130 Q135,135 130,140 L115,155%22 stroke=%22%239CA3AF%22 fill=%22none%22 stroke-width=%222%22 opacity=%220.3%22/%3E%3C!-- Small dots --%3E%3Ccircle cx=%22160%22 cy=%2280%22 r=%223%22 fill=%22%239CA3AF%22 opacity=%220.2%22/%3E%3Ccircle cx=%2250%22 cy=%22120%22 r=%223%22 fill=%22%239CA3AF%22 opacity=%220.2%22/%3E%3Ccircle cx=%22100%22 cy=%2270%22 r=%223%22 fill=%22%239CA3AF%22 opacity=%220.2%22/%3E%3C/pattern%3E%3C/defs%3E%3Crect width=%22200%22 height=%22200%22 fill=%22url(%23telegram-pattern)%22/%3E%3C/svg%3E'); background-size: 200px 200px;"></div>
-            `;
+      // Remove welcome if exists (but preserve background layers)
+      this.clearMessagesOnly();
+      this.ensureBackgroundLayers();
+
       messagesList = document.createElement("div");
       messagesList.className = "max-w-5xl mx-auto space-y-4 relative z-10";
       messagesContainer.appendChild(messagesList);
@@ -348,7 +485,7 @@ const ChatApp = {
             </div>
         `;
     messagesList.insertAdjacentHTML("beforeend", notificationHTML);
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    this.scrollToBottom();
   },
 
   onUserLeft(data) {
@@ -368,7 +505,7 @@ const ChatApp = {
                 </div>
             `;
       messagesList.insertAdjacentHTML("beforeend", notificationHTML);
-      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      this.scrollToBottom();
     }
   },
 
@@ -394,10 +531,9 @@ const ChatApp = {
   onChatHistory(messages) {
     const messagesContainer = document.getElementById("messagesContainer");
 
-    // Clear container but keep pattern
-    messagesContainer.innerHTML = `
-            <div class="absolute inset-0 opacity-[0.03]" style="background-image: url('data:image/svg+xml,%3Csvg width=%22200%22 height=%22200%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cdefs%3E%3Cpattern id=%22telegram-pattern%22 x=%220%22 y=%220%22 width=%22200%22 height=%22200%22 patternUnits=%22userSpaceOnUse%22%3E%3C!-- Message Icon --%3E%3Cpath d=%22M30,40 L50,40 L50,60 L40,70 L40,60 L30,60 Z%22 fill=%22%239CA3AF%22 opacity=%220.4%22/%3E%3C!-- Heart Icon --%3E%3Cpath d=%22M150,30 Q160,20 170,30 Q175,35 170,45 L160,55 L150,45 Q145,35 150,30 Z%22 fill=%22%239CA3AF%22 opacity=%220.3%22/%3E%3C!-- Star Icon --%3E%3Cpath d=%22M80,140 L85,155 L100,157 L90,167 L92,182 L80,175 L68,182 L70,167 L60,157 L75,155 Z%22 fill=%22%239CA3AF%22 opacity=%220.35%22/%3E%3C!-- Circle --%3E%3Ccircle cx=%22170%22 cy=%22140%22 r=%228%22 fill=%22%239CA3AF%22 opacity=%220.25%22/%3E%3C!-- Camera Icon --%3E%3Crect x=%2230%22 y=%22160%22 width=%2230%22 height=%2220%22 rx=%223%22 fill=%22%239CA3AF%22 opacity=%220.3%22/%3E%3Ccircle cx=%2245%22 cy=%22170%22 r=%226%22 fill=%22%239CA3AF%22 opacity=%220.4%22/%3E%3C!-- Music Note --%3E%3Cpath d=%22M140,80 L145,80 L145,100 Q145,105 140,105 Q135,105 135,100 L135,85 Z%22 fill=%22%239CA3AF%22 opacity=%220.3%22/%3E%3Ccircle cx=%22140%22 cy=%22105%22 r=%224%22 fill=%22%239CA3AF%22 opacity=%220.35%22/%3E%3C!-- Phone Icon --%3E%3Crect x=%2275%22 y=%2230%22 width=%2215%22 height=%2225%22 rx=%223%22 fill=%22%239CA3AF%22 opacity=%220.3%22/%3E%3C!-- Paperclip --%3E%3Cpath d=%22M110,150 Q105,145 110,140 L120,130 Q125,125 130,130 Q135,135 130,140 L115,155%22 stroke=%22%239CA3AF%22 fill=%22none%22 stroke-width=%222%22 opacity=%220.3%22/%3E%3C!-- Small dots --%3E%3Ccircle cx=%22160%22 cy=%2280%22 r=%223%22 fill=%22%239CA3AF%22 opacity=%220.2%22/%3E%3Ccircle cx=%2250%22 cy=%22120%22 r=%223%22 fill=%22%239CA3AF%22 opacity=%220.2%22/%3E%3Ccircle cx=%22100%22 cy=%2270%22 r=%223%22 fill=%22%239CA3AF%22 opacity=%220.2%22/%3E%3C/pattern%3E%3C/defs%3E%3Crect width=%22200%22 height=%22200%22 fill=%22url(%23telegram-pattern)%22/%3E%3C/svg%3E'); background-size: 200px 200px;"></div>
-        `;
+    // Clear only messages, preserve background layers
+    this.clearMessagesOnly();
+    this.ensureBackgroundLayers();
 
     if (messages.length === 0) {
       const welcomeDiv = document.createElement("div");
@@ -431,7 +567,7 @@ const ChatApp = {
     });
 
     // Scroll to bottom
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    this.scrollToBottom();
   },
 
   createMessageElement(data, isOwn, isValid) {
@@ -441,7 +577,9 @@ const ChatApp = {
     });
 
     const alignment = isOwn ? "justify-end" : "justify-start";
-    const bgColor = isOwn ? "gradient-primary" : "bg-dark-800";
+    const bubbleStyle = isOwn
+      ? "bg-gradient-to-br from-indigo-600 to-purple-600 shadow-lg shadow-indigo-500/30"
+      : "bg-white/10 backdrop-blur-md border border-white/20 shadow-lg";
     const errorBadge = !isValid
       ? `<span class="text-xs text-red-400 ml-2">[CRC Error]</span>`
       : "";
@@ -452,10 +590,10 @@ const ChatApp = {
                   !isOwn
                     ? `
                     <div class="flex-shrink-0">
-                        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center overflow-hidden">
+                        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center overflow-hidden ring-2 ring-indigo-500/30">
                             ${
                               data.photo
-                                ? `<img src="${data.photo}" alt="${data.username}" class="w-full h-full object-cover">`
+                                ? `<img src="${data.photo}" alt="${data.username}" class="w-full h-full object-cover object-center">`
                                 : `<span class="text-sm font-semibold">${data.username
                                     .charAt(0)
                                     .toUpperCase()}</span>`
@@ -468,28 +606,35 @@ const ChatApp = {
                 <div class="max-w-md">
                     ${
                       !isOwn
-                        ? `<div class="text-xs text-gray-400 mb-1 ml-1">${data.username}</div>`
+                        ? `<div class="text-xs font-medium text-indigo-300 mb-1 ml-1">${data.username}</div>`
                         : ""
                     }
-                    <div class="${bgColor} px-4 py-2.5 rounded-2xl ${
+                    <div class="${bubbleStyle} px-4 py-2.5 rounded-2xl ${
       isOwn ? "rounded-tr-sm" : "rounded-tl-sm"
-    } shadow-lg">
-                        <p class="text-sm leading-relaxed break-words">${this.escapeHTML(
+    } transition-all hover:scale-[1.02] relative">
+                        <p class="text-sm leading-relaxed break-words pr-14">${this.escapeHTML(
                           data.message
                         )}</p>
-                    </div>
-                    <div class="text-xs text-gray-500 mt-1 ml-1">
-                        ${time}${errorBadge}
+                        <!-- Timestamp inside bubble -->
+                        <div class="absolute bottom-2 right-3 text-[10px] ${
+                          isOwn ? "text-white/70" : "text-gray-400"
+                        } flex items-center gap-1 select-none">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <polyline points="12 6 12 12 16 14"></polyline>
+                            </svg>
+                            ${time}${errorBadge}
+                        </div>
                     </div>
                 </div>
                 ${
                   isOwn
                     ? `
                     <div class="flex-shrink-0">
-                        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center overflow-hidden">
+                        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center overflow-hidden ring-2 ring-indigo-500/30">
                             ${
                               data.photo
-                                ? `<img src="${data.photo}" alt="You" class="w-full h-full object-cover">`
+                                ? `<img src="${data.photo}" alt="You" class="w-full h-full object-cover object-center">`
                                 : `<span class="text-sm font-semibold">${data.username
                                     .charAt(0)
                                     .toUpperCase()}</span>`
@@ -505,6 +650,12 @@ const ChatApp = {
 
   updateMembersList() {
     const membersBadge = document.getElementById("membersBadge");
+
+    // Check if element exists
+    if (!membersBadge) {
+      console.log("⚠️ Members badge not found, skipping update");
+      return;
+    }
 
     // Update badge count
     membersBadge.textContent = this.members.size;
@@ -545,29 +696,335 @@ const ChatApp = {
   updateCurrentUserUI() {
     if (!this.currentProfile) return;
 
-    const currentUserName = document.getElementById("currentUserName");
-    const currentUserAvatar = document.getElementById("currentUserAvatar");
+    // Update modal current user (if modal exists)
+    const modalCurrentUserName = document.getElementById(
+      "modalCurrentUserName"
+    );
+    const modalCurrentUserAvatar = document.getElementById(
+      "modalCurrentUserAvatar"
+    );
 
-    if (!currentUserName || !currentUserAvatar) {
-      console.warn("User UI elements not found. Skipping update.");
-      return;
+    if (modalCurrentUserName) {
+      modalCurrentUserName.textContent = this.currentProfile.username;
     }
 
-    currentUserName.textContent = this.currentProfile.username;
-
-    if (this.currentProfile.photo) {
-      currentUserAvatar.innerHTML = `<img src="${this.currentProfile.photo}" class="w-10 h-10 rounded-full object-cover">`;
-    } else {
-      currentUserAvatar.innerHTML = `
-        <span class="text-lg font-semibold">
-          ${this.currentProfile.username.charAt(0).toUpperCase()}
-        </span>`;
+    if (modalCurrentUserAvatar) {
+      if (this.currentProfile.photo) {
+        const img = modalCurrentUserAvatar.querySelector("img");
+        if (img) {
+          img.src = this.currentProfile.photo;
+        }
+      } else {
+        modalCurrentUserAvatar.innerHTML = `<span class="text-lg font-semibold">${this.currentProfile.username
+          .charAt(0)
+          .toUpperCase()}</span>`;
+      }
     }
+
+    console.log("✅ Current user UI updated:", this.currentProfile.username);
   },
 
   getClientIP() {
     // Get from current profile
     return this.currentProfile?.ip_client || "unknown";
+  },
+
+  toggleCRCConsole() {
+    const crcConsole = document.getElementById("crcDebugConsole");
+    console.log("🔧 Toggle CRC Console:", {
+      consoleExists: !!crcConsole,
+      isHidden: crcConsole?.classList.contains("hidden"),
+    });
+
+    if (!crcConsole) {
+      console.error("❌ CRC Debug Console element not found!");
+      return;
+    }
+
+    if (crcConsole.classList.contains("hidden")) {
+      crcConsole.classList.remove("hidden");
+      console.log("✅ CRC Console opened");
+    } else {
+      crcConsole.classList.add("hidden");
+      console.log("✅ CRC Console closed");
+    }
+  },
+
+  logCRCProcess(message, crc) {
+    console.log("📊 logCRCProcess called:", { message, crc });
+
+    const consoleContent = document.getElementById("crcConsoleContent");
+    if (!consoleContent) {
+      console.error("❌ crcConsoleContent element not found!");
+      return;
+    }
+
+    console.log("✅ Found crcConsoleContent, logging process...");
+
+    const timestamp = new Date().toLocaleTimeString("id-ID", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      fractionalSecondDigits: 3,
+    });
+
+    // Convert binary to hex and decimal for reference
+    const crcInt = parseInt(crc, 2);
+    const hex = crcInt.toString(16).toUpperCase().padStart(8, "0");
+
+    // Format binary dengan spacing setiap 8 bit
+    const binaryFormatted = crc.match(/.{1,8}/g).join(" ");
+
+    // Convert message to binary for visualization
+    let messageBinary = "";
+    let messageBinaryFormatted = "";
+    for (let i = 0; i < message.length; i++) {
+      const charBinary = message.charCodeAt(i).toString(2).padStart(8, "0");
+      messageBinary += charBinary;
+      messageBinaryFormatted += `${message[i]}: ${charBinary}\n`;
+    }
+
+    // Append zeros (32 bits)
+    const dataWithZeros = messageBinary + "0".repeat(32);
+    const totalBits = messageBinary.length + 32;
+
+    // Generator info
+    const generatorHex = "0x04C11DB7";
+    const generatorBinary = "100000100110000010001110110110111";
+    const generatorDecimal = parseInt(generatorBinary, 2);
+
+    const logHTML = `
+            <div class="mt-3 border border-indigo-700/30 rounded-lg p-4 bg-gradient-to-br from-dark-800/50 to-indigo-900/20">
+                <div class="flex items-center justify-between mb-3 pb-2 border-b border-indigo-700/30">
+                    <div class="text-cyan-400 font-semibold flex items-center gap-2">
+                        <span class="text-lg">⚡</span> NEW MESSAGE SENT
+                    </div>
+                    <div class="text-gray-600 text-[10px] font-mono">[${timestamp}]</div>
+                </div>
+                
+                <!-- Step 1: Data Original -->
+                <div class="mb-4 p-3 bg-dark-900/40 rounded-lg border border-gray-800">
+                    <div class="text-yellow-400 text-xs font-bold mb-2">📝 STEP 1: DATA ASLI</div>
+                    <div class="pl-3 space-y-2">
+                        <div class="text-green-300 font-semibold">"${this.escapeHTML(
+                          message
+                        )}"</div>
+                        <div class="text-gray-500 text-[10px]">
+                            Length: ${message.length} characters = ${
+      message.length * 8
+    } bits
+                        </div>
+                        <div class="mt-2">
+                            <div class="text-gray-500 text-[10px] mb-1">Konversi ke Binary:</div>
+                            <div class="text-gray-400 text-[10px] font-mono whitespace-pre-wrap pl-2 bg-black/30 p-2 rounded">${messageBinaryFormatted.trim()}</div>
+                        </div>
+                        <div class="mt-2">
+                            <div class="text-gray-500 text-[10px]">Binary lengkap (${
+                              message.length * 8
+                            } bits):</div>
+                            <div class="text-purple-300 text-[10px] font-mono break-all leading-relaxed bg-black/30 p-2 rounded mt-1">
+                                ${messageBinary.match(/.{1,8}/g).join(" ")}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2: Generator (Pembagi) -->
+                <div class="mb-4 p-3 bg-dark-900/40 rounded-lg border border-gray-800">
+                    <div class="text-yellow-400 text-xs font-bold mb-2">🔑 STEP 2: GENERATOR (Pembagi G)</div>
+                    <div class="pl-3 space-y-2">
+                        <div class="text-gray-400 text-[10px]">
+                            CRC-32 menggunakan <span class="text-cyan-400">angka pembagi standar</span>:
+                        </div>
+                        <div class="space-y-1 pl-2">
+                            <div class="text-[10px]">
+                                <span class="text-gray-500">Hexadecimal:</span>
+                                <span class="text-cyan-300 font-mono ml-2">${generatorHex}</span>
+                            </div>
+                            <div class="text-[10px]">
+                                <span class="text-gray-500">Decimal:</span>
+                                <span class="text-green-300 font-mono ml-2">${generatorDecimal.toLocaleString()}</span>
+                            </div>
+                            <div class="text-[10px]">
+                                <span class="text-gray-500">Binary (33 bits):</span>
+                                <div class="text-yellow-300 font-mono break-all leading-relaxed bg-black/30 p-2 rounded mt-1">
+                                    ${generatorBinary
+                                      .match(/.{1,8}/g)
+                                      .join(" ")}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="text-gray-600 text-[10px] italic">
+                            ℹ️ Kenapa 33 bits? Karena CRC-32 butuh sisa 32 bits, pembagi harus +1 bit
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 3: Append Zeros -->
+                <div class="mb-4 p-3 bg-dark-900/40 rounded-lg border border-gray-800">
+                    <div class="text-yellow-400 text-xs font-bold mb-2">➕ STEP 3: TAMBAHKAN NOL</div>
+                    <div class="pl-3 space-y-2">
+                        <div class="text-gray-400 text-[10px]">
+                            Tambahkan <span class="text-orange-400">32 bit nol</span> di belakang data:
+                        </div>
+                        <div class="space-y-1 pl-2 text-[10px]">
+                            <div>
+                                <span class="text-gray-500">Data asli:</span>
+                                <span class="text-purple-300 font-mono ml-2">${
+                                  message.length * 8
+                                } bits</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-500">Tambah nol:</span>
+                                <span class="text-orange-300 font-mono ml-2">32 bits (00000000 00000000 00000000 00000000)</span>
+                            </div>
+                            <div class="pt-1 border-t border-gray-700 mt-1">
+                                <span class="text-gray-500">Total:</span>
+                                <span class="text-cyan-300 font-mono ml-2 font-bold">${totalBits} bits</span>
+                            </div>
+                        </div>
+                        <div class="text-gray-400 text-[10px] bg-black/30 p-2 rounded font-mono break-all leading-relaxed mt-2">
+                            ${dataWithZeros.match(/.{1,8}/g).join(" ")}
+                        </div>
+                        <div class="text-gray-600 text-[10px] italic">
+                            💡 Kenapa tambah nol? Supaya hasil sisa pembagian tepat 32 bits!
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 4: XOR Division -->
+                <div class="mb-4 p-3 bg-dark-900/40 rounded-lg border border-gray-800">
+                    <div class="text-yellow-400 text-xs font-bold mb-2">➗ STEP 4: PEMBAGIAN XOR</div>
+                    <div class="pl-3 space-y-2">
+                        <div class="text-gray-400 text-[10px]">
+                            Bagi data (${totalBits} bits) dengan G (33 bits) menggunakan <span class="text-red-400">operasi XOR</span>:
+                        </div>
+                        <div class="bg-black/40 p-2 rounded space-y-1 text-[10px]">
+                            <div class="text-cyan-300 font-bold">Aturan XOR (⊕):</div>
+                            <div class="pl-2 font-mono space-y-0.5">
+                                <div><span class="text-yellow-300">1 ⊕ 1 = 0</span> (sama → 0)</div>
+                                <div><span class="text-yellow-300">1 ⊕ 0 = 1</span> (beda → 1)</div>
+                                <div><span class="text-yellow-300">0 ⊕ 1 = 1</span> (beda → 1)</div>
+                                <div><span class="text-yellow-300">0 ⊕ 0 = 0</span> (sama → 0)</div>
+                            </div>
+                        </div>
+                        <div class="text-gray-400 text-[10px] space-y-1 mt-2">
+                            <div class="font-semibold text-orange-300">Proses:</div>
+                            <div class="pl-2 space-y-0.5">
+                                <div>1. Align G dengan bit pertama yang '1'</div>
+                                <div>2. Lakukan XOR bit-by-bit</div>
+                                <div>3. Geser hasil, cari '1' berikutnya</div>
+                                <div>4. Ulangi sampai semua ${totalBits} bits diproses</div>
+                                <div>5. Sisa terakhir = <span class="text-purple-400">32 bits</span></div>
+                            </div>
+                        </div>
+                        <div class="text-gray-600 text-[10px] italic bg-gray-900/30 p-2 rounded mt-2">
+                            ⚙️ Proses ini dilakukan oleh algoritma CRC-32 table lookup (sangat cepat!)
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 5: Final XOR -->
+                <div class="mb-4 p-3 bg-dark-900/40 rounded-lg border border-gray-800">
+                    <div class="text-yellow-400 text-xs font-bold mb-2">🔄 STEP 5: FINAL XOR</div>
+                    <div class="pl-3 space-y-2">
+                        <div class="text-gray-400 text-[10px]">
+                            Sisa pembagian di-XOR dengan <span class="text-cyan-400">0xFFFFFFFF</span>:
+                        </div>
+                        <div class="bg-black/30 p-2 rounded font-mono text-[10px] space-y-1">
+                            <div class="text-gray-500">Remainder (sisa) ⊕ 0xFFFFFFFF</div>
+                            <div class="text-purple-300">= CRC32 Checksum Final</div>
+                        </div>
+                        <div class="text-gray-600 text-[10px] italic">
+                            💡 Ini adalah standar CRC-32, untuk meningkatkan deteksi error
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Result -->
+                <div class="p-3 bg-gradient-to-r from-purple-900/30 to-indigo-900/30 rounded-lg border border-purple-700/50">
+                    <div class="text-purple-300 text-xs font-bold mb-3 flex items-center gap-2">
+                        <span class="text-lg">✅</span> HASIL AKHIR: CRC32 CHECKSUM
+                    </div>
+                    
+                    <div class="space-y-3 pl-3">
+                        <!-- Binary -->
+                        <div>
+                            <div class="text-gray-500 text-[10px] mb-1">Binary (32-bit):</div>
+                            <div class="text-purple-200 font-mono text-xs bg-black/40 p-2 rounded break-all leading-relaxed">
+                                ${binaryFormatted}
+                            </div>
+                        </div>
+                        
+                        <!-- Hexadecimal -->
+                        <div>
+                            <div class="text-gray-500 text-[10px] mb-1">Hexadecimal:</div>
+                            <div class="text-cyan-300 font-mono text-sm bg-black/40 p-2 rounded">
+                                0x${hex}
+                            </div>
+                        </div>
+                        
+                        <!-- Decimal -->
+                        <div>
+                            <div class="text-gray-500 text-[10px] mb-1">Decimal:</div>
+                            <div class="text-green-300 font-mono text-sm bg-black/40 p-2 rounded">
+                                ${crcInt.toLocaleString()}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Transmission & Verification -->
+                <div class="mt-4 p-3 bg-dark-900/40 rounded-lg border border-gray-800">
+                    <div class="text-orange-400 text-xs font-bold mb-2">📡 TRANSMISSION FRAME</div>
+                    <div class="pl-3 space-y-2">
+                        <div class="text-gray-400 text-[10px]">
+                            Yang dikirim ke penerima:
+                        </div>
+                        <div class="bg-black/30 p-2 rounded font-mono text-[10px]">
+                            <div class="text-cyan-300">[ Message: ${
+                              message.length * 8
+                            } bits ] + [ CRC32: 32 bits ]</div>
+                            <div class="text-gray-500 mt-1">= Total ${totalBits} bits</div>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-3 pt-3 border-t border-gray-800">
+                        <div class="text-green-400 text-xs font-bold mb-2">🔍 VERIFIKASI (Penerima)</div>
+                        <div class="pl-3 text-[10px] space-y-1 text-gray-400">
+                            <div>1. Penerima dapat: <span class="text-cyan-300">Data + CRC (${totalBits} bits)</span></div>
+                            <div>2. Bagi dengan G (sama seperti pengirim)</div>
+                            <div>3. Jika sisa = <span class="text-green-400">00000000 00000000 00000000 00000000</span> → ✅ <span class="text-green-400">Tidak ada error</span></div>
+                            <div>4. Jika sisa ≠ 0 → ❌ <span class="text-red-400">Error terdeteksi!</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+    consoleContent.insertAdjacentHTML("beforeend", logHTML);
+    consoleContent.scrollTop = consoleContent.scrollHeight;
+    console.log("✅ CRC process logged successfully");
+  },
+
+  clearCRCConsole() {
+    const consoleContent = document.getElementById("crcConsoleContent");
+    if (!consoleContent) return;
+
+    consoleContent.innerHTML = `
+            <div class="text-green-400">
+                <span class="text-gray-500">$</span> Monitor cleared
+            </div>
+            <div class="text-gray-500 mt-1">Waiting for new messages...</div>
+            <div class="h-px bg-gray-800 my-3"></div>
+        `;
+  },
+
+  testCRCLog() {
+    const testMessage = "Hallo World";
+    const testCRC = crc32.calculate(testMessage);
+    console.log("🧪 Test CRC Log:", { testMessage, testCRC });
+    this.logCRCProcess(testMessage, testCRC);
   },
 
   escapeHTML(text) {

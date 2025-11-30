@@ -118,6 +118,22 @@ const SocketManager = {
     // Calculate CRC32
     const crc = crc32.calculate(message);
 
+    // Log CRC process to console
+    console.log("💾 Logging CRC process...", {
+      message,
+      crc,
+      ChatAppExists: !!window.ChatApp,
+    });
+    if (window.ChatApp && typeof window.ChatApp.logCRCProcess === "function") {
+      try {
+        window.ChatApp.logCRCProcess(message, crc);
+      } catch (error) {
+        console.error("❌ Error logging CRC process:", error);
+      }
+    } else {
+      console.warn("⚠️ ChatApp.logCRCProcess not available");
+    }
+
     const messageData = {
       message: message,
       crc: crc,
